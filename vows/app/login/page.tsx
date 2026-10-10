@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { loginAction } from "./actions";
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
@@ -19,8 +18,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           {error === "credentials" && <p className="text-sm text-red-700">E-mailadres of wachtwoord is niet juist.</p>}
           <button type="submit" className="w-full rounded-lg bg-[#2D3A47] px-4 py-3 font-bold text-white hover:bg-[#425365]">Inloggen</button>
         </form>
-        <p className="mt-6 text-center text-sm text-[#536577]">Nog geen account? <Link href="/registreren" className="font-bold underline">Registreren</Link></p>
-        <p className="mt-2 text-center text-sm text-[#536577]"><Link href="/wachtwoord-vergeten" className="font-bold underline">Wachtwoord vergeten?</Link></p>
+        <p className="mt-6 text-center text-sm text-[#536577]"><a href="/wachtwoord-vergeten" className="font-bold underline">Wachtwoord vergeten?</a></p>
       </div>
     </main>
   );

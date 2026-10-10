@@ -16,6 +16,8 @@ export default function TakenPage() {
   const [newTask, setNewTask] = useState("");
   const [childFor, setChildFor] = useState<string | null>(null);
   const [newChild, setNewChild] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
 
   useEffect(() => {
     void fetch("/api/data/tasks")
@@ -60,6 +62,22 @@ export default function TakenPage() {
     setTasks((current) => current.filter((task) => task.id !== id && task.parentId !== id));
   }
 
+  function startEditing(task: Task) {
+    setEditingId(task.id);
+    setEditingTitle(task.title);
+  }
+
+  async function saveTaskTitle() {
+    const task = tasks.find((item) => item.id === editingId);
+    if (!task || !editingTitle.trim()) return;
+    const updated = { ...task, title: editingTitle.trim() };
+    const response = await fetch("/api/data/tasks", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(updated) });
+    if (!response.ok) return;
+    setTasks((current) => current.map((item) => item.id === updated.id ? updated : item));
+    setEditingId(null);
+    setEditingTitle("");
+  }
+
   const parentTasks = tasks.filter((task) => !task.parentId);
 
   return (
@@ -83,7 +101,8 @@ export default function TakenPage() {
                 <div key={task.id} className="rounded-xl border border-[#dce3e8] p-4">
                   <div className="flex items-center gap-3">
                     <input type="checkbox" checked={task.completed} onChange={() => toggleTask(task.id)} className="h-4 w-4 accent-[#2D3A47]" />
-                    <span className={`flex-1 font-semibold ${task.completed ? "text-[#9aa7b1] line-through" : ""}`}>{task.title}</span>
+                    {editingId === task.id ? <input autoFocus value={editingTitle} onChange={(event) => setEditingTitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void saveTaskTitle(); }} className="min-w-0 flex-1 rounded border px-2 py-1" /> : <span className={`flex-1 font-semibold ${task.completed ? "text-[#9aa7b1] line-through" : ""}`}>{task.title}</span>}
+                    {editingId === task.id ? <button type="button" onClick={() => void saveTaskTitle()} className="text-sm font-semibold">Opslaan</button> : <button type="button" onClick={() => startEditing(task)} className="text-sm font-semibold text-[#536577]">Wijzigen</button>}
                     <button type="button" onClick={() => setChildFor(childFor === task.id ? null : task.id)} className="text-sm font-semibold text-[#536577] hover:text-[#2D3A47]">+ Subtaak</button>
                     <button type="button" onClick={() => removeTask(task.id)} className="text-sm text-[#718292] hover:text-red-700">Verwijder</button>
                   </div>
@@ -98,7 +117,8 @@ export default function TakenPage() {
                       {children.map((child) => (
                         <div key={child.id} className="flex items-center gap-3 text-sm">
                           <input type="checkbox" checked={child.completed} onChange={() => toggleTask(child.id)} className="h-4 w-4 accent-[#2D3A47]" />
-                          <span className={`flex-1 ${child.completed ? "text-[#9aa7b1] line-through" : ""}`}>{child.title}</span>
+                          {editingId === child.id ? <input autoFocus value={editingTitle} onChange={(event) => setEditingTitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void saveTaskTitle(); }} className="min-w-0 flex-1 rounded border px-2 py-1" /> : <span className={`flex-1 ${child.completed ? "text-[#9aa7b1] line-through" : ""}`}>{child.title}</span>}
+                          {editingId === child.id ? <button type="button" onClick={() => void saveTaskTitle()} className="text-sm font-semibold">Opslaan</button> : <button type="button" onClick={() => startEditing(child)} className="text-sm font-semibold text-[#536577]">Wijzigen</button>}
                           <button type="button" onClick={() => removeTask(child.id)} className="text-[#718292] hover:text-red-700">Verwijder</button>
                         </div>
                       ))}

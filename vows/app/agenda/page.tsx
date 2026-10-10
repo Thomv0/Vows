@@ -12,6 +12,7 @@ type Appointment = {
   date: string;
   time: string;
   location: string;
+  visibleToCeremoniemeester?: boolean;
 };
 
 const weekDays = ["Ma", "Di", "Wo", "Do", "Vr", "Za", "Zo"];
@@ -64,11 +65,13 @@ export default function AgendaPage() {
   const [inspectedAppointment, setInspectedAppointment] = useState<Appointment | null>(null);
   const [editingAppointmentId, setEditingAppointmentId] = useState<string | null>(null);
   const [formError, setFormError] = useState("");
+  const [planningDialog, setPlanningDialog] = useState<{ appointment: Appointment; title: string; time: string; location: string } | null>(null);
   const [form, setForm] = useState({
     title: "",
     date: dateKey(today),
     time: "09:00",
     location: "",
+    visibleToCeremoniemeester: false,
   });
 
   useEffect(() => {
@@ -119,8 +122,8 @@ export default function AgendaPage() {
     setEditingAppointmentId(appointment?.id ?? null);
     setFormError("");
     setForm(appointment
-      ? { title: appointment.title, date: appointment.date, time: appointment.time, location: appointment.location }
-      : { title: "", date: dateKey(date), time: "09:00", location: "" });
+      ? { title: appointment.title, date: appointment.date, time: appointment.time, location: appointment.location, visibleToCeremoniemeester: Boolean(appointment.visibleToCeremoniemeester) }
+      : { title: "", date: dateKey(date), time: "09:00", location: "", visibleToCeremoniemeester: false });
     setIsDialogOpen(true);
   }
 
@@ -148,12 +151,29 @@ export default function AgendaPage() {
       setFormError("De afspraak kon niet worden opgeslagen.");
       return;
     }
+
     setAppointments((current) => editingAppointmentId
       ? current.map((appointment) => appointment.id === editingAppointmentId ? savedAppointment : appointment)
       : [...current, savedAppointment]);
     setSelectedDate(new Date(`${form.date}T12:00:00`));
     setIsDialogOpen(false);
     setEditingAppointmentId(null);
+  }
+
+  async function addToPlanning() {
+    if (!planningDialog) return;
+    const response = await fetch("/api/data/planning", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: crypto.randomUUID(), time: planningDialog.time, title: planningDialog.title.trim(), location: planningDialog.location.trim() }),
+    });
+    if (!response.ok) {
+      setFormError("De afspraak kon niet aan de planning worden toegevoegd.");
+      return;
+    }
+    setInspectedAppointment(null);
+    setPlanningDialog(null);
+    setFormError("Afspraak toegevoegd aan de planning.");
   }
 
   async function deleteAppointment(id: string) {
@@ -227,7 +247,7 @@ export default function AgendaPage() {
 
         <section className="overflow-hidden rounded-2xl bg-white shadow-lg">
           <div className="flex flex-col gap-4 border-b border-[#dce3e8] p-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
               <button type="button" onClick={goToToday} className="rounded-lg border border-[#cad4dc] px-3 py-2 text-sm font-semibold hover:bg-[#f2f5f7]">
                 Vandaag
               </button>
@@ -237,15 +257,15 @@ export default function AgendaPage() {
               <button type="button" aria-label="Volgende periode" onClick={() => moveCalendar(1)} className="rounded-lg border border-[#cad4dc] px-3 py-2 text-lg leading-none hover:bg-[#f2f5f7]">
                 ›
               </button>
-              <h3 className="ml-2 text-lg font-bold">{rangeLabel}</h3>
+              <h3 className="ml-2 min-w-0 truncate text-lg font-bold">{rangeLabel}</h3>
             </div>
-            <div className="flex rounded-lg bg-[#edf1f4] p-1">
+            <div className="flex w-full rounded-lg bg-[#edf1f4] p-1 sm:w-auto">
               {(["day", "week", "month"] as CalendarView[]).map((option) => (
                 <button
                   key={option}
                   type="button"
                   onClick={() => setView(option)}
-                  className={`rounded-md px-4 py-2 text-sm font-semibold capitalize ${view === option ? "bg-white shadow-sm" : "text-[#536577]"}`}
+                  className={`flex-1 rounded-md px-3 py-2 text-sm font-semibold capitalize sm:px-4 ${view === option ? "bg-white shadow-sm" : "text-[#536577]"}`}
                 >
                   {option === "day" ? "Dag" : option === "week" ? "Week" : "Maand"}
                 </button>
@@ -254,7 +274,8 @@ export default function AgendaPage() {
           </div>
 
           {view === "month" && (
-            <div className="grid grid-cols-7">
+            <div className="overflow-x-auto">
+            <div className="grid min-w-[560px] grid-cols-7">
               {weekDays.map((day) => (
                 <div key={day} className="border-b border-[#dce3e8] p-3 text-center text-xs font-bold uppercase tracking-wide text-[#718292]">{day}</div>
               ))}
@@ -282,10 +303,12 @@ export default function AgendaPage() {
                 );
               })}
             </div>
+            </div>
           )}
 
           {view === "week" && (
-            <div className="grid grid-cols-7 divide-x divide-[#dce3e8] overflow-x-auto">
+            <div className="overflow-x-auto">
+            <div className="grid min-w-[700px] grid-cols-7 divide-x divide-[#dce3e8]">
               {weekDaysWithDates.map((date, index) => (
                 <div key={date.toISOString()} className="min-h-80 min-w-28">
                   <button type="button" onClick={() => openDialog(date)} className={`w-full border-b border-[#dce3e8] p-3 text-center hover:bg-[#f5f8fa] ${dateKey(date) === dateKey(today) ? "text-[#2D3A47]" : "text-[#718292]"}`}>
@@ -305,6 +328,7 @@ export default function AgendaPage() {
                   </div>
                 </div>
               ))}
+            </div>
             </div>
           )}
 
@@ -372,6 +396,7 @@ export default function AgendaPage() {
                 <input value={form.location} onChange={(event) => setForm({ ...form, location: event.target.value })} className="mt-1 w-full rounded-lg border border-[#cad4dc] px-3 py-2 outline-none focus:border-[#2D3A47]" placeholder="Bijvoorbeeld: stadhuis" />
                 {form.location && <LocationMap key={form.location} locations={[{ id: "new", title: form.title || "Nieuwe afspraak", location: form.location }]} className="mt-2 h-36" />}
               </label>
+              <label className="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={form.visibleToCeremoniemeester} onChange={(event) => setForm({ ...form, visibleToCeremoniemeester: event.target.checked })} /> Ook zichtbaar voor de ceremoniemeester</label>
               {formError && <p className="text-sm text-red-700">{formError}</p>}
               <div className="flex justify-end gap-3 pt-2">
                 <button type="button" onClick={() => setIsDialogOpen(false)} className="rounded-lg px-4 py-2 text-sm font-semibold text-[#536577] hover:bg-[#edf1f4]">Annuleren</button>
@@ -403,14 +428,27 @@ export default function AgendaPage() {
                 </div>
               )}
             </dl>
-            <div className="mt-5 flex justify-between">
-              <div className="flex gap-2">
-                <button type="button" onClick={() => { setInspectedAppointment(null); openDialog(new Date(`${inspectedAppointment.date}T12:00:00`), inspectedAppointment); }} className="rounded-lg bg-[#edf1f4] px-4 py-2 text-sm font-semibold hover:bg-[#dce3e8]">Wijzigen</button>
-                <button type="button" onClick={() => deleteAppointment(inspectedAppointment.id)} className="rounded-lg px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50">Verwijderen</button>
-                <button type="button" onClick={() => downloadIcs(inspectedAppointment)} className="rounded-lg bg-[#edf1f4] px-4 py-2 text-sm font-semibold hover:bg-[#dce3e8]">Aan agenda toevoegen</button>
-              </div>
-              <button type="button" onClick={() => setInspectedAppointment(null)} className="rounded-lg bg-[#2D3A47] px-5 py-2 text-sm font-bold text-white hover:bg-[#425365]">Sluiten</button>
+            <div className="mt-5 grid grid-cols-2 gap-2">
+                <button type="button" onClick={() => { setInspectedAppointment(null); openDialog(new Date(`${inspectedAppointment.date}T12:00:00`), inspectedAppointment); }} className="rounded-lg bg-[#edf1f4] px-3 py-3 text-sm font-semibold hover:bg-[#dce3e8]">Wijzigen</button>
+                <button type="button" onClick={() => deleteAppointment(inspectedAppointment.id)} className="rounded-lg bg-red-50 px-3 py-3 text-sm font-semibold text-red-700 hover:bg-red-100">Verwijderen</button>
+                <button type="button" onClick={() => downloadIcs(inspectedAppointment)} className="rounded-lg bg-[#edf1f4] px-3 py-3 text-sm font-semibold hover:bg-[#dce3e8]">Aan eigen agenda toevoegen</button>
+                <button type="button" onClick={() => setPlanningDialog({ appointment: inspectedAppointment, title: `Afspraak: ${inspectedAppointment.title}`, time: inspectedAppointment.time, location: inspectedAppointment.location })} className="rounded-lg bg-[#edf1f4] px-3 py-3 text-sm font-semibold hover:bg-[#dce3e8]">Naar planning</button>
+                <button type="button" onClick={() => setInspectedAppointment(null)} className="col-span-2 rounded-lg bg-[#2D3A47] px-5 py-3 text-sm font-bold text-white hover:bg-[#425365]">Sluiten</button>
             </div>
+          </div>
+        </div>
+      )}
+      {planningDialog && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-[#2D3A47]/50 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 text-[#2D3A47] shadow-2xl">
+            <h2 className="text-2xl font-bold">Aan planning toevoegen</h2>
+            <p className="mt-2 text-sm text-[#536577]">Controleer wat er als nieuw moment wordt overgenomen.</p>
+            <div className="mt-4 space-y-3">
+              <label className="block text-sm font-semibold">Titel<input value={planningDialog.title} onChange={(event) => setPlanningDialog({ ...planningDialog, title: event.target.value })} className="mt-1 w-full rounded-lg border px-3 py-2" /></label>
+              <label className="block text-sm font-semibold">Tijd<select value={planningDialog.time} onChange={(event) => setPlanningDialog({ ...planningDialog, time: event.target.value })} className="mt-1 w-full rounded-lg border bg-white px-3 py-2">{Array.from({ length: 96 }, (_, index) => { const value = `${String(Math.floor(index / 4)).padStart(2, "0")}:${String((index % 4) * 15).padStart(2, "0")}`; return <option key={value}>{value}</option>; })}</select></label>
+              <label className="block text-sm font-semibold">Locatie<input value={planningDialog.location} onChange={(event) => setPlanningDialog({ ...planningDialog, location: event.target.value })} className="mt-1 w-full rounded-lg border px-3 py-2" /></label>
+            </div>
+            <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setPlanningDialog(null)} className="rounded-lg bg-[#edf1f4] px-4 py-2 font-semibold">Annuleren</button><button type="button" onClick={addToPlanning} disabled={!planningDialog.title.trim()} className="rounded-lg bg-[#2D3A47] px-4 py-2 font-bold text-white disabled:opacity-50">Toevoegen</button></div>
           </div>
         </div>
       )}

@@ -3,7 +3,7 @@ import { ObjectId, type Collection } from "mongodb";
 import clientPromise from "@/lib/mongodb";
 import { auth } from "@/auth";
 
-const allowedResources = new Set(["appointments", "planning", "tasks"]);
+const allowedResources = new Set(["appointments", "planning", "tasks", "costs"]);
 
 function collectionName(resource: string) {
   if (!allowedResources.has(resource)) {
@@ -21,7 +21,13 @@ async function getCollection(resource: string): Promise<Collection<StoredDocumen
 
 async function getUserId() {
   const session = await auth();
-  return session?.user?.id;
+  return session;
+}
+
+function appointmentFilter(userId: string, role: string) {
+  if (role === "bruid" || role === "bruidegom") return { $or: [{ userId }, { sharedWithCouple: true }] };
+  if (role === "ceremoniemeester") return { $or: [{ userId }, { visibleToCeremoniemeester: true }] };
+  return { userId };
 }
 
 export async function GET(
@@ -30,10 +36,12 @@ export async function GET(
 ) {
   try {
     const { resource } = await params;
-    const userId = await getUserId();
-    if (!userId) return NextResponse.json({ error: "Inloggen is verplicht." }, { status: 401 });
+    const session = await getUserId();
+    if (!session?.user?.id) return NextResponse.json({ error: "Inloggen is verplicht." }, { status: 401 });
+    if (resource === "costs" && session.user.role !== "bruid" && session.user.role !== "bruidegom") return NextResponse.json({ error: "Je hebt geen toegang tot kosten." }, { status: 403 });
     const collection = await getCollection(resource);
-    const documents = await collection.find({ userId }).sort({ date: 1, time: 1, createdAt: 1 }).toArray();
+    const filter = resource === "appointments" ? appointmentFilter(session.user.id, session.user.role) : { userId: session.user.id };
+    const documents = await collection.find(filter).sort({ date: 1, time: 1, createdAt: 1 }).toArray();
     return NextResponse.json(documents.map((document) => {
       const { _id, ...result } = document;
       void _id;
@@ -50,10 +58,11 @@ export async function POST(
 ) {
   try {
     const { resource } = await params;
-    const userId = await getUserId();
-    if (!userId) return NextResponse.json({ error: "Inloggen is verplicht." }, { status: 401 });
+    const session = await getUserId();
+    if (!session?.user?.id) return NextResponse.json({ error: "Inloggen is verplicht." }, { status: 401 });
+    if (resource === "costs" && session.user.role !== "bruid" && session.user.role !== "bruidegom") return NextResponse.json({ error: "Je hebt geen toegang tot kosten." }, { status: 403 });
     const body = await request.json();
-    const document = { ...body, userId, _id: body.id ?? new ObjectId().toHexString(), createdAt: new Date() };
+    const document = { ...body, userId: session.user.id, ...(resource === "appointments" ? { sharedWithCouple: true, visibleToCeremoniemeester: Boolean(body.visibleToCeremoniemeester) } : {}), _id: body.id ?? new ObjectId().toHexString(), createdAt: new Date() };
     const collection = await getCollection(resource);
     const existing = await collection.findOne({ _id: document._id });
     if (existing) {
@@ -74,14 +83,15 @@ export async function PUT(
 ) {
   try {
     const { resource } = await params;
-    const userId = await getUserId();
-    if (!userId) return NextResponse.json({ error: "Inloggen is verplicht." }, { status: 401 });
+    const session = await getUserId();
+    if (!session?.user?.id) return NextResponse.json({ error: "Inloggen is verplicht." }, { status: 401 });
+    if (resource === "costs" && session.user.role !== "bruid" && session.user.role !== "bruidegom") return NextResponse.json({ error: "Je hebt geen toegang tot kosten." }, { status: 403 });
     const body = await request.json();
     if (!body.id) return NextResponse.json({ error: "Een id is verplicht." }, { status: 400 });
     const { id, ...changes } = body;
     const collection = await getCollection(resource);
     const result = await collection.findOneAndUpdate(
-      { _id: id, userId },
+      resource === "appointments" ? { _id: id, ...appointmentFilter(session.user.id, session.user.role) } : { _id: id, userId: session.user.id },
       { $set: { ...changes, updatedAt: new Date() } },
       { returnDocument: "after" },
     );
@@ -100,12 +110,13 @@ export async function DELETE(
 ) {
   try {
     const { resource } = await params;
-    const userId = await getUserId();
-    if (!userId) return NextResponse.json({ error: "Inloggen is verplicht." }, { status: 401 });
+    const session = await getUserId();
+    if (!session?.user?.id) return NextResponse.json({ error: "Inloggen is verplicht." }, { status: 401 });
+    if (resource === "costs" && session.user.role !== "bruid" && session.user.role !== "bruidegom") return NextResponse.json({ error: "Je hebt geen toegang tot kosten." }, { status: 403 });
     const id = new URL(request.url).searchParams.get("id");
     if (!id) return NextResponse.json({ error: "Een id is verplicht." }, { status: 400 });
     const collection = await getCollection(resource);
-    const result = await collection.deleteOne({ _id: id, userId });
+    const result = await collection.deleteOne(resource === "appointments" ? { _id: id, ...appointmentFilter(session.user.id, session.user.role) } : { _id: id, userId: session.user.id });
     if (!result.deletedCount) return NextResponse.json({ error: "Gegevens niet gevonden." }, { status: 404 });
     return NextResponse.json({ success: true });
   } catch {
