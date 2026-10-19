@@ -3,7 +3,7 @@ import { ObjectId, type Collection } from "mongodb";
 import clientPromise from "@/lib/mongodb";
 import { auth } from "@/auth";
 
-const allowedResources = new Set(["appointments", "planning", "tasks", "costs"]);
+const allowedResources = new Set(["appointments", "planning", "tasks", "costs", "budget", "homes", "house-search-settings"]);
 
 function collectionName(resource: string) {
   if (!allowedResources.has(resource)) {
@@ -26,7 +26,19 @@ async function getUserId() {
 
 function appointmentFilter(userId: string, role: string) {
   if (role === "bruid" || role === "bruidegom") return { $or: [{ userId }, { sharedWithCouple: true }] };
+  if (role === "ceremoniemeester") return { $or: [{ userId }, { visibleToCeremoniemeester: true }], privateCoupleOnly: { $ne: true } };
+  return { userId };
+}
+
+function taskFilter(userId: string, role: string) {
+  if (role === "bruid" || role === "bruidegom") return { $or: [{ userId }, { sharedWithCouple: { $ne: false } }] };
   if (role === "ceremoniemeester") return { $or: [{ userId }, { visibleToCeremoniemeester: true }] };
+  return { userId };
+}
+
+function readableFilter(resource: string, userId: string, role: string) {
+  if (resource === "appointments") return appointmentFilter(userId, role);
+  if (resource === "tasks") return taskFilter(userId, role);
   return { userId };
 }
 
@@ -38,14 +50,14 @@ export async function GET(
     const { resource } = await params;
     const session = await getUserId();
     if (!session?.user?.id) return NextResponse.json({ error: "Inloggen is verplicht." }, { status: 401 });
-    if (resource === "costs" && session.user.role !== "bruid" && session.user.role !== "bruidegom") return NextResponse.json({ error: "Je hebt geen toegang tot kosten." }, { status: 403 });
+    if (["costs", "budget", "homes", "house-search-settings"].includes(resource) && session.user.role !== "bruid" && session.user.role !== "bruidegom") return NextResponse.json({ error: "Deze gegevens zijn alleen voor bruid en bruidegom." }, { status: 403 });
     const collection = await getCollection(resource);
-    const filter = resource === "appointments" ? appointmentFilter(session.user.id, session.user.role) : { userId: session.user.id };
+    const filter = readableFilter(resource, session.user.id, session.user.role);
     const documents = await collection.find(filter).sort({ date: 1, time: 1, createdAt: 1 }).toArray();
     return NextResponse.json(documents.map((document) => {
       const { _id, ...result } = document;
       void _id;
-      return result;
+      return resource === "tasks" ? { ...result, canEdit: document.userId === session.user.id } : result;
     }));
   } catch {
     return NextResponse.json({ error: "Gegevens ophalen is mislukt." }, { status: 500 });
@@ -60,17 +72,44 @@ export async function POST(
     const { resource } = await params;
     const session = await getUserId();
     if (!session?.user?.id) return NextResponse.json({ error: "Inloggen is verplicht." }, { status: 401 });
-    if (resource === "costs" && session.user.role !== "bruid" && session.user.role !== "bruidegom") return NextResponse.json({ error: "Je hebt geen toegang tot kosten." }, { status: 403 });
+    if (["costs", "budget", "homes", "house-search-settings"].includes(resource) && session.user.role !== "bruid" && session.user.role !== "bruidegom") return NextResponse.json({ error: "Deze gegevens zijn alleen voor bruid en bruidegom." }, { status: 403 });
     const body = await request.json();
-    const document = { ...body, userId: session.user.id, ...(resource === "appointments" ? { sharedWithCouple: true, visibleToCeremoniemeester: Boolean(body.visibleToCeremoniemeester) } : {}), _id: body.id ?? new ObjectId().toHexString(), createdAt: new Date() };
+    const { canEdit: _canEdit, userId: _userId, _id: _documentId, ...submittedBody } = body;
+    void _canEdit;
+    void _userId;
+    void _documentId;
+    const document = {
+      ...submittedBody,
+      userId: session.user.id,
+      ...(resource === "appointments" || resource === "tasks"
+        ? {
+            sharedWithCouple: body.sharedWithCouple !== false,
+            visibleToCeremoniemeester: Boolean(body.visibleToCeremoniemeester),
+            ...(resource === "appointments" ? { privateCoupleOnly: Boolean(body.privateCoupleOnly) } : {}),
+          }
+        : {}),
+      _id: body.id ?? new ObjectId().toHexString(),
+      createdAt: new Date(),
+    };
     const collection = await getCollection(resource);
+    if (resource === "house-search-settings") {
+      await collection.updateOne(
+        { _id: document._id, userId: session.user.id },
+        { $set: document },
+        { upsert: true },
+      );
+      const { _id, ...result } = document;
+      void _id;
+      return NextResponse.json(result, { status: 200 });
+    }
     const existing = await collection.findOne({ _id: document._id });
     if (existing) {
       return NextResponse.json({ error: "Dit id bestaat al." }, { status: 409 });
     }
     await collection.insertOne(document);
-    const { _id, ...result } = document;
+    const { _id, canEdit: _savedCanEdit, ...result } = document;
     void _id;
+    void _savedCanEdit;
     return NextResponse.json(result, { status: 201 });
   } catch {
     return NextResponse.json({ error: "Gegevens opslaan is mislukt." }, { status: 500 });
@@ -85,10 +124,19 @@ export async function PUT(
     const { resource } = await params;
     const session = await getUserId();
     if (!session?.user?.id) return NextResponse.json({ error: "Inloggen is verplicht." }, { status: 401 });
-    if (resource === "costs" && session.user.role !== "bruid" && session.user.role !== "bruidegom") return NextResponse.json({ error: "Je hebt geen toegang tot kosten." }, { status: 403 });
+    if (["costs", "budget", "homes", "house-search-settings"].includes(resource) && session.user.role !== "bruid" && session.user.role !== "bruidegom") return NextResponse.json({ error: "Deze gegevens zijn alleen voor bruid en bruidegom." }, { status: 403 });
     const body = await request.json();
     if (!body.id) return NextResponse.json({ error: "Een id is verplicht." }, { status: 400 });
-    const { id, ...changes } = body;
+    const { id, userId: _userId, _id: _documentId, ...submittedChanges } = body;
+    void _userId;
+    void _documentId;
+    const changes = resource === "tasks"
+      ? {
+          ...submittedChanges,
+          sharedWithCouple: submittedChanges.sharedWithCouple !== false,
+          visibleToCeremoniemeester: Boolean(submittedChanges.visibleToCeremoniemeester),
+        }
+      : submittedChanges;
     const collection = await getCollection(resource);
     const result = await collection.findOneAndUpdate(
       resource === "appointments" ? { _id: id, ...appointmentFilter(session.user.id, session.user.role) } : { _id: id, userId: session.user.id },
@@ -112,7 +160,7 @@ export async function DELETE(
     const { resource } = await params;
     const session = await getUserId();
     if (!session?.user?.id) return NextResponse.json({ error: "Inloggen is verplicht." }, { status: 401 });
-    if (resource === "costs" && session.user.role !== "bruid" && session.user.role !== "bruidegom") return NextResponse.json({ error: "Je hebt geen toegang tot kosten." }, { status: 403 });
+    if (["costs", "budget", "homes", "house-search-settings"].includes(resource) && session.user.role !== "bruid" && session.user.role !== "bruidegom") return NextResponse.json({ error: "Deze gegevens zijn alleen voor bruid en bruidegom." }, { status: 403 });
     const id = new URL(request.url).searchParams.get("id");
     if (!id) return NextResponse.json({ error: "Een id is verplicht." }, { status: 400 });
     const collection = await getCollection(resource);

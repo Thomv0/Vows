@@ -63,6 +63,7 @@ export default function Header(props: { active?: string }) {
     const isAdmin = session?.user?.email?.trim().toLowerCase() === ADMIN_EMAIL;
     const optionalPages = [
         { name: "Kosten", href: "/kosten", visible: isCouple },
+        { name: "Huis zoeken", href: "/huizen", visible: isCouple },
         { name: "Beheer", href: "/beheer", visible: isAdmin },
     ];
     const pages: Array<{ name: string; href: string; visible?: boolean }> = [...basePages, ...optionalPages];
@@ -70,6 +71,7 @@ export default function Header(props: { active?: string }) {
         if (name === "Inspiratie") return "sm:w-28";
         if (name === "Planning") return "sm:w-24";
         if (name === "Kosten" || name === "Beheer") return "sm:w-20";
+        if (name === "Huis zoeken") return "sm:w-28";
         return "sm:w-16";
     };
 

@@ -13,6 +13,7 @@ type Appointment = {
   time: string;
   location: string;
   visibleToCeremoniemeester?: boolean;
+  privateCoupleOnly?: boolean;
 };
 
 const weekDays = ["Ma", "Di", "Wo", "Do", "Vr", "Za", "Zo"];
@@ -72,6 +73,7 @@ export default function AgendaPage() {
     time: "09:00",
     location: "",
     visibleToCeremoniemeester: false,
+    privateCoupleOnly: false,
   });
 
   useEffect(() => {
@@ -122,8 +124,8 @@ export default function AgendaPage() {
     setEditingAppointmentId(appointment?.id ?? null);
     setFormError("");
     setForm(appointment
-      ? { title: appointment.title, date: appointment.date, time: appointment.time, location: appointment.location, visibleToCeremoniemeester: Boolean(appointment.visibleToCeremoniemeester) }
-      : { title: "", date: dateKey(date), time: "09:00", location: "", visibleToCeremoniemeester: false });
+      ? { title: appointment.title, date: appointment.date, time: appointment.time, location: appointment.location, visibleToCeremoniemeester: Boolean(appointment.visibleToCeremoniemeester), privateCoupleOnly: Boolean(appointment.privateCoupleOnly) }
+      : { title: "", date: dateKey(date), time: "09:00", location: "", visibleToCeremoniemeester: false, privateCoupleOnly: false });
     setIsDialogOpen(true);
   }
 
@@ -293,7 +295,7 @@ export default function AgendaPage() {
                     <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-sm font-semibold ${isToday ? "bg-[#2D3A47] text-white" : ""}`}>{date.getDate()}</span>
                     <span className="mt-1 block space-y-1">
                       {dayAppointments.slice(0, 3).map((appointment) => (
-                        <span key={appointment.id} onClick={(event) => { event.stopPropagation(); setInspectedAppointment(appointment); }} className="block cursor-pointer truncate rounded bg-[#dce8ef] px-2 py-1 text-xs font-semibold text-[#2D3A47]">
+                        <span key={appointment.id} onClick={(event) => { event.stopPropagation(); setInspectedAppointment(appointment); }} className={`block cursor-pointer truncate rounded px-2 py-1 text-xs font-semibold ${appointment.privateCoupleOnly ? "bg-[#e6d8f0] text-[#5b3672]" : "bg-[#dce8ef] text-[#2D3A47]"}`}>
                           {formatTime(appointment.time)} {appointment.title}
                         </span>
                       ))}
@@ -317,7 +319,7 @@ export default function AgendaPage() {
                   </button>
                   <div className="space-y-2 p-2">
                     {appointmentsFor(date).map((appointment) => (
-                      <div key={appointment.id} className="rounded-lg bg-[#dce8ef] p-2 text-xs">
+                      <div key={appointment.id} className={`rounded-lg p-2 text-xs ${appointment.privateCoupleOnly ? "bg-[#e6d8f0] text-[#5b3672]" : "bg-[#dce8ef]"}`}>
                         <button type="button" onClick={() => setInspectedAppointment(appointment)} className="w-full text-left">
                           <p className="font-bold">{formatTime(appointment.time)}</p>
                           <p className="mt-1 font-semibold">{appointment.title}</p>
@@ -397,6 +399,7 @@ export default function AgendaPage() {
                 {form.location && <LocationMap key={form.location} locations={[{ id: "new", title: form.title || "Nieuwe afspraak", location: form.location }]} className="mt-2 h-36" />}
               </label>
               <label className="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={form.visibleToCeremoniemeester} onChange={(event) => setForm({ ...form, visibleToCeremoniemeester: event.target.checked })} /> Ook zichtbaar voor de ceremoniemeester</label>
+              <label className="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={form.privateCoupleOnly} onChange={(event) => setForm({ ...form, privateCoupleOnly: event.target.checked, visibleToCeremoniemeester: event.target.checked ? false : form.visibleToCeremoniemeester })} /> Privé voor bruid en bruidegom</label>
               {formError && <p className="text-sm text-red-700">{formError}</p>}
               <div className="flex justify-end gap-3 pt-2">
                 <button type="button" onClick={() => setIsDialogOpen(false)} className="rounded-lg px-4 py-2 text-sm font-semibold text-[#536577] hover:bg-[#edf1f4]">Annuleren</button>
