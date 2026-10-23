@@ -24,14 +24,18 @@ async function getUserId() {
   return session;
 }
 
-async function coupleUserFilter(userId: string) {
+async function coupleUserIds(userId: string) {
   const client = await clientPromise;
   const users = await client.db("vows").collection<{ id: string; role: string }>("users")
     .find({ role: { $in: ["bruid", "bruidegom"] } }, { projection: { id: 1 } })
     .toArray();
   const userIds = users.map((user) => user.id);
   if (!userIds.includes(userId)) userIds.push(userId);
-  return { userId: { $in: userIds } };
+  return userIds;
+}
+
+async function coupleUserFilter(userId: string) {
+  return { userId: { $in: await coupleUserIds(userId) } };
 }
 
 function appointmentFilter(userId: string, role: string) {
@@ -49,7 +53,7 @@ function taskFilter(userId: string, role: string) {
 async function readableFilter(resource: string, userId: string, role: string) {
   if (resource === "appointments") return appointmentFilter(userId, role);
   if (resource === "tasks") return taskFilter(userId, role);
-  if (resource === "homes" && (role === "bruid" || role === "bruidegom")) return coupleUserFilter(userId);
+  if ((resource === "homes" || resource === "house-search-settings") && (role === "bruid" || role === "bruidegom")) return coupleUserFilter(userId);
   return { userId };
 }
 
@@ -64,7 +68,9 @@ export async function GET(
     if (["costs", "budget", "homes", "house-search-settings"].includes(resource) && session.user.role !== "bruid" && session.user.role !== "bruidegom") return NextResponse.json({ error: "Deze gegevens zijn alleen voor bruid en bruidegom." }, { status: 403 });
     const collection = await getCollection(resource);
     const filter = await readableFilter(resource, session.user.id, session.user.role);
-    const documents = await collection.find(filter).sort({ date: 1, time: 1, createdAt: 1 }).toArray();
+    const documents = resource === "house-search-settings"
+      ? await collection.find(filter).sort({ updatedAt: -1, createdAt: -1 }).limit(1).toArray()
+      : await collection.find(filter).sort({ date: 1, time: 1, createdAt: 1 }).toArray();
     return NextResponse.json(documents.map((document) => {
       const { _id, ...result } = document;
       void _id;
@@ -104,8 +110,12 @@ export async function POST(
     };
     const collection = await getCollection(resource);
     if (resource === "house-search-settings") {
+      const settingsFilter = {
+        _id: document._id,
+        userId: { $in: await coupleUserIds(session.user.id) },
+      };
       await collection.updateOne(
-        { _id: document._id, userId: session.user.id },
+        settingsFilter,
         { $set: document },
         { upsert: true },
       );
@@ -152,6 +162,8 @@ export async function PUT(
     const result = await collection.findOneAndUpdate(
       resource === "appointments"
         ? { _id: id, ...appointmentFilter(session.user.id, session.user.role) }
+        : resource === "house-search-settings" && (session.user.role === "bruid" || session.user.role === "bruidegom")
+          ? { _id: id, ...(await coupleUserFilter(session.user.id)) }
         : resource === "homes" && (session.user.role === "bruid" || session.user.role === "bruidegom")
           ? { _id: id, ...(await coupleUserFilter(session.user.id)) }
           : { _id: id, userId: session.user.id },
