@@ -24,6 +24,16 @@ async function getUserId() {
   return session;
 }
 
+async function coupleUserFilter(userId: string) {
+  const client = await clientPromise;
+  const users = await client.db("vows").collection<{ id: string; role: string }>("users")
+    .find({ role: { $in: ["bruid", "bruidegom"] } }, { projection: { id: 1 } })
+    .toArray();
+  const userIds = users.map((user) => user.id);
+  if (!userIds.includes(userId)) userIds.push(userId);
+  return { userId: { $in: userIds } };
+}
+
 function appointmentFilter(userId: string, role: string) {
   if (role === "bruid" || role === "bruidegom") return { $or: [{ userId }, { sharedWithCouple: true }] };
   if (role === "ceremoniemeester") return { $or: [{ userId }, { visibleToCeremoniemeester: true }], privateCoupleOnly: { $ne: true } };
@@ -36,9 +46,10 @@ function taskFilter(userId: string, role: string) {
   return { userId };
 }
 
-function readableFilter(resource: string, userId: string, role: string) {
+async function readableFilter(resource: string, userId: string, role: string) {
   if (resource === "appointments") return appointmentFilter(userId, role);
   if (resource === "tasks") return taskFilter(userId, role);
+  if (resource === "homes" && (role === "bruid" || role === "bruidegom")) return coupleUserFilter(userId);
   return { userId };
 }
 
@@ -52,7 +63,7 @@ export async function GET(
     if (!session?.user?.id) return NextResponse.json({ error: "Inloggen is verplicht." }, { status: 401 });
     if (["costs", "budget", "homes", "house-search-settings"].includes(resource) && session.user.role !== "bruid" && session.user.role !== "bruidegom") return NextResponse.json({ error: "Deze gegevens zijn alleen voor bruid en bruidegom." }, { status: 403 });
     const collection = await getCollection(resource);
-    const filter = readableFilter(resource, session.user.id, session.user.role);
+    const filter = await readableFilter(resource, session.user.id, session.user.role);
     const documents = await collection.find(filter).sort({ date: 1, time: 1, createdAt: 1 }).toArray();
     return NextResponse.json(documents.map((document) => {
       const { _id, ...result } = document;
@@ -139,7 +150,11 @@ export async function PUT(
       : submittedChanges;
     const collection = await getCollection(resource);
     const result = await collection.findOneAndUpdate(
-      resource === "appointments" ? { _id: id, ...appointmentFilter(session.user.id, session.user.role) } : { _id: id, userId: session.user.id },
+      resource === "appointments"
+        ? { _id: id, ...appointmentFilter(session.user.id, session.user.role) }
+        : resource === "homes" && (session.user.role === "bruid" || session.user.role === "bruidegom")
+          ? { _id: id, ...(await coupleUserFilter(session.user.id)) }
+          : { _id: id, userId: session.user.id },
       { $set: { ...changes, updatedAt: new Date() } },
       { returnDocument: "after" },
     );
@@ -164,7 +179,13 @@ export async function DELETE(
     const id = new URL(request.url).searchParams.get("id");
     if (!id) return NextResponse.json({ error: "Een id is verplicht." }, { status: 400 });
     const collection = await getCollection(resource);
-    const result = await collection.deleteOne(resource === "appointments" ? { _id: id, ...appointmentFilter(session.user.id, session.user.role) } : { _id: id, userId: session.user.id });
+    const result = await collection.deleteOne(
+      resource === "appointments"
+        ? { _id: id, ...appointmentFilter(session.user.id, session.user.role) }
+        : resource === "homes" && (session.user.role === "bruid" || session.user.role === "bruidegom")
+          ? { _id: id, ...(await coupleUserFilter(session.user.id)) }
+          : { _id: id, userId: session.user.id },
+    );
     if (!result.deletedCount) return NextResponse.json({ error: "Gegevens niet gevonden." }, { status: 404 });
     return NextResponse.json({ success: true });
   } catch {
